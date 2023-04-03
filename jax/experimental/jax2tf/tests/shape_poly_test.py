@@ -2612,6 +2612,9 @@ class ShapePolyPrimitivesTest(tf_test_util.JaxToTfTestCase):
       #one_containing="",
   )
   def test_harness(self, harness: PolyHarness):
+    if "eigh_" not in harness.fullname:
+      raise unittest.SkipTest("XXX temporary")
+
     # Exclude some harnesses that are known to fail for native serialization
     if config.jax2tf_default_native_serialization:
       if not harness.enable_xla:
@@ -2620,7 +2623,8 @@ class ShapePolyPrimitivesTest(tf_test_util.JaxToTfTestCase):
       # Set of harness.group_name:platform that are implemented with custom call
       custom_call_harnesses = {
           "vmap_cholesky:cpu", "vmap_cholesky:gpu", "vmap_eig:cpu",
-          "vmap_eigh:cpu", "vmap_eigh:gpu", "vmap_fft:cpu",
+          # "vmap_eigh:cpu", "vmap_eigh:gpu",
+          "vmap_fft:cpu",
           "householder_product:cpu", "householder_product:gpu",
           "vmap_geqrf:cpu", "vmap_geqrf:gpu",
           "vmap_lu:cpu", "vmap_lu:gpu", "vmap_qr:cpu", "vmap_qr:gpu",

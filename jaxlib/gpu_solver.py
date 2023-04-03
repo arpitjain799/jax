@@ -254,14 +254,21 @@ rocm_orgqr = partial(_orgqr_hlo, "hip", _hipsolver)
 
 
 def _syevd_hlo(platform, gpu_solver, have_jacobi_solver, dtype, a,
-               lower=False):
+               batch_size: ir.Value,
+               result_shape_v: ir.Value, result_shape_w: ir.Value,
+               result_shape_info: ir.Value, lower=False):
   """Symmetric (Hermitian) eigendecomposition."""
   a_type = ir.RankedTensorType(a.type)
   dims = a_type.shape
   assert len(dims) >= 2
   m, n = dims[-2:]
   assert m == n
+  assert n != ir.ShapedType.get_dynamic_size()
   batch_dims = tuple(dims[:-2])
+
+  if any(d == ir.ShapedType.get_dynamic_size() for d in batch_dims):
+    raise NotImplementedError("dynamic batch size for eigh on GPU")
+
   num_bd = len(batch_dims)
   batch = math.prod(batch_dims)
   layout = (num_bd, num_bd + 1) + tuple(range(num_bd - 1, -1, -1))

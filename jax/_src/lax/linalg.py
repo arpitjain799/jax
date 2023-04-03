@@ -44,6 +44,7 @@ from jax._src.lib import gpu_linalg
 from jax._src.lib import gpu_solver
 from jax._src.lib import gpu_sparse
 from jax._src.lib import lapack
+from jax._src.lib import version as jaxlib_version
 from jax._src.lib import xla_client
 from jax._src.lib.mlir import ir
 from jax._src.lib.mlir.dialects import chlo
@@ -658,14 +659,33 @@ def _eigh_abstract_eval(operand, *, lower, sort_eigenvalues):
 
 def _eigh_cpu_gpu_lowering(syevd_impl, ctx, operand, *, lower,
                            sort_eigenvalues):
-  if any(not is_constant_shape(a.shape) for a in (ctx.avals_in + ctx.avals_out)):
-    raise NotImplementedError("Shape polymorphism for custom call is not implemented (eigh); b/261671778")
-
   del sort_eigenvalues  # The CPU/GPU implementations always sort.
   operand_aval, = ctx.avals_in
   v_aval, w_aval = ctx.avals_out
+
+  can_handle_dynamic_batch = (jaxlib_version >= (0, 4, 9))
+  if not can_handle_dynamic_batch:
+    if not is_constant_shape(operand_aval.shape):
+      raise NotImplementedError("Shape polymorphism for custom call is not implemented (eigh); b/261671778")
+  else:
+    if not is_constant_shape(operand_aval.shape[-2:]):
+      raise NotImplementedError(f"Shape polymorphism for eigh is implemented only for the batch dimension: {operand_aval.shape}")
+
   batch_dims = operand_aval.shape[:-2]
-  v, w, info = syevd_impl(operand_aval.dtype, operand, lower=lower)
+  if can_handle_dynamic_batch:
+    batch_size_num = np.prod(batch_dims) if batch_dims else 1
+    batch_size = mlir.eval_dynamic_shape(ctx, (batch_size_num,))[0]
+    if isinstance(batch_size, int):
+      batch_size = mlir.ir_constant(np.int32(batch_size))
+    v_shape: ir.Value = mlir.shape_tensor(mlir.eval_dynamic_shape(ctx, v_aval.shape))
+    w_shape: ir.Value = mlir.shape_tensor(mlir.eval_dynamic_shape(ctx, w_aval.shape))
+    info_shape: ir.Value = mlir.shape_tensor(mlir.eval_dynamic_shape(ctx, batch_dims))
+    v, w, info = syevd_impl(operand_aval.dtype, operand, batch_size,
+                            v_shape, w_shape, info_shape,
+                            lower=lower)
+  else:
+    v, w, info = syevd_impl(operand_aval.dtype, operand, lower=lower)
+
   zeros = mlir.full_like_aval(ctx, 0, ShapedArray(batch_dims, np.dtype(np.int32)))
   ok = mlir.compare_hlo(info, zeros, "EQ", "SIGNED")
   select_v_aval = ShapedArray(batch_dims + (1, 1), np.dtype(np.bool_))
