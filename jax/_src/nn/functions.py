@@ -237,6 +237,24 @@ def selu(x: Array) -> Array:
   scale = 1.0507009873554804934193349852946
   return scale * elu(x, alpha)
 
+
+@jax.custom_jvp
+def _approximate_erf_for_gelu(x: Array) -> Array:
+  r"""Approximate version of error function for used in GELU."""
+  sqrt_2_over_pi = np.sqrt(2 / np.pi).astype(x.dtype)
+  cdf = 0.5 * (1.0 + jnp.tanh(sqrt_2_over_pi * (x + 0.044715 * (x**3))))
+  return cdf
+
+
+@_approximate_erf_for_gelu.defjvp
+def _approximate_erf_for_gelu_jvp(primals: Array, tangents: Array) -> Array:
+  (x,) = primals
+  (x_dot,) = tangents
+  sqrt_2_over_pi = np.sqrt(2 / np.pi).astype(x.dtype)
+  deriv = sqrt_2_over_pi * jnp.exp(-(x**2) * 0.5) * x_dot
+  return _approximate_erf_for_gelu(x), deriv
+
+
 # TODO(phawkins): this jit was found to change numerics in a test. Debug this.
 # @partial(jax.jit, static_argnames=("approximate",))
 def gelu(x: Array, approximate: bool = True) -> Array:
@@ -266,8 +284,7 @@ def gelu(x: Array, approximate: bool = True) -> Array:
   x = x.astype(dtypes.to_inexact_dtype(x.dtype))
 
   if approximate:
-    sqrt_2_over_pi = np.sqrt(2 / np.pi).astype(x.dtype)
-    cdf = 0.5 * (1.0 + jnp.tanh(sqrt_2_over_pi * (x + 0.044715 * (x ** 3))))
+    cdf = _approximate_erf_for_gelu(x)
     return x * cdf
   else:
     sqrt_2 = np.sqrt(2).astype(x.dtype)
